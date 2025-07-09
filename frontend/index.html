@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>🎓 AI Teacher Quiz Bot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+    }
+    .widget-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 420px;
+      height: 600px;
+      max-height: 85vh;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+      border-radius: 16px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+    }
+    @media (max-width: 600px) {
+      .widget-container {
+        width: 100vw;
+        height: 100vh;
+        bottom: 0;
+        right: 0;
+        border-radius: 0;
+      }
+    }
+    .widget-header {
+      background: linear-gradient(135deg, #4A90E2, #007AFF);
+      color: white;
+      padding: 18px;
+      font-size: 18px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .widget-header span {
+      font-size: 14px;
+      opacity: 0.85;
+    }
+    .widget-body {
+      padding: 16px;
+      overflow-y: auto;
+      flex: 1;
+      background: #fafbfc;
+    }
+    .chat-message {
+      margin-bottom: 14px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      max-width: 90%;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .bot {
+      background: #e3f2fd;
+      color: #0d47a1;
+      align-self: flex-start;
+      border-left: 4px solid #42a5f5;
+    }
+    .user {
+      background: #dcedc8;
+      color: #33691e;
+      align-self: flex-end;
+      border-right: 4px solid #8bc34a;
+      text-align: right;
+    }
+    .widget-footer {
+      padding: 12px 16px;
+      border-top: 1px solid #ddd;
+      background: #ffffff;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .widget-footer input[type='file'],
+    .widget-footer input[type='text'] {
+      flex: 1;
+      padding: 10px;
+      font-size: 13px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+    .widget-footer button {
+      background: #4A90E2;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      font-size: 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+    .widget-footer button:hover {
+      background: #007AFF;
+    }
+  </style>
+</head>
+<body>
+
+<div class="widget-container">
+  <div class="widget-header">
+    AI Teacher Quiz
+    <span>Voice & AI powered</span>
+  </div>
+  <div class="widget-body" id="chat"></div>
+  <div class="widget-footer">
+    <input placeholder="file" type="file" id="audioFile" accept="audio/*,video/*">
+    <button onclick="uploadFile()">Upload</button>
+    <input type="text" id="youtubeUrl" placeholder="Paste YouTube Link">
+    <button onclick="uploadYouTube()">Transcribe</button>
+  </div>
+</div>
+
+<script>
+  const chat = document.getElementById("chat");
+  let currentQuestion = 0;
+  let quizData = [];
+
+  function addMessage(text, sender = 'bot') {
+    const div = document.createElement("div");
+    div.className = `chat-message ${sender}`;
+    div.innerText = text;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  async function uploadFile() {
+    const fileInput = document.getElementById("audioFile");
+    const file = fileInput.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    addMessage("📤 Uploading file and transcribing...", 'bot');
+    const res = await fetch("http://localhost:5000/upload", {
+      method: "POST",
+      body: formData
+    });
+    const data = await res.json();
+    if (data.transcript) generateQuiz(data.transcript);
+  }
+
+  async function uploadYouTube() {
+    const url = document.getElementById("youtubeUrl").value;
+    if (!url) return;
+    addMessage("🎧 Transcribing YouTube audio...", 'bot');
+    const res = await fetch("http://localhost:5000/youtube", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url })
+    });
+    const data = await res.json();
+    if (data.transcript) generateQuiz(data.transcript);
+  }
+
+  async function generateQuiz(transcript) {
+    addMessage("🧠 Generating quiz from transcript...", 'bot');
+    const res = await fetch("http://localhost:5000/generate-quiz", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript, count: 5 })
+    });
+    const data = await res.json();
+    if (data.quiz) {
+      quizData = data.quiz;
+      currentQuestion = 0;
+      speakQuestion(quizData[currentQuestion]);
+    }
+  }
+
+  function speakQuestion(questionObj) {
+    const questionText = `Question ${currentQuestion + 1}: ${questionObj.question}. Options are: ${questionObj.options.join(', ')}`;
+    addMessage(questionText, 'bot');
+    const utterance = new SpeechSynthesisUtterance(questionText);
+    speechSynthesis.speak(utterance);
+    utterance.onend = () => listenForAnswer(questionObj);
+  }
+
+  function listenForAnswer(questionObj) {
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.start();
+
+    recognition.onresult = (event) => {
+      const answer = event.results[0][0].transcript.trim().toLowerCase();
+      addMessage(`My answer is: ${answer}`, 'user');
+      const correct = questionObj.answer.toLowerCase();
+      if (answer.includes(correct)) {
+        addMessage("✅ Correct!", 'bot');
+      } else {
+        addMessage(`❌ Incorrect. Correct answer is: ${questionObj.answer}`, 'bot');
+      }
+      currentQuestion++;
+      if (currentQuestion < quizData.length) {
+        setTimeout(() => speakQuestion(quizData[currentQuestion]), 1500);
+      } else {
+        addMessage("🎉 Quiz Completed! Say 'retry' to try again.", 'bot');
+        listenForRetry();
+      }
+    };
+
+    recognition.onerror = (event) => {
+      addMessage("⚠️ Error recognizing voice. Please try again.", 'bot');
+    };
+  }
+
+  function listenForRetry() {
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.start();
+
+    recognition.onresult = (event) => {
+      const command = event.results[0][0].transcript.trim().toLowerCase();
+      if (command.includes("retry")) {
+        currentQuestion = 0;
+        speakQuestion(quizData[currentQuestion]);
+      } else {
+        addMessage("Say 'retry' if you want to take the quiz again.", 'bot');
+        listenForRetry();
+      }
+    };
+  }
+</script>
+
+</body>
+</html>
